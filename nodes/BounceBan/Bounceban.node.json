@@ -1,0 +1,19 @@
+{
+	"node": "n8n-nodes-base.BounceBan",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Utility"],
+	"resources": {
+		"primaryDocumentation": [
+			{
+				"url": "https://bounceban.com/public/doc/api.html"
+			}
+		],
+		"credentialDocumentation": [
+			{
+				"url": "https://bounceban.com/app/api/settings"
+			}
+		]
+	},
+	"alias": ["email validation", "email verify", "verify catch-all email"]
+}
