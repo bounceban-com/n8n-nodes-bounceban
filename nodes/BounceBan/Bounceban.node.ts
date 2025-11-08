@@ -39,12 +39,12 @@ export class Bounceban implements INodeType {
 				options: [
 					{
 						name: 'Verify Single Email',
-						value: 'verifySingle',
+						value: 'validateEmail',
 						description: 'Verify a single email address',
 						action: 'Verify a single email address',
 					}
 				],
-				default: 'verifySingle',
+				default: 'validateEmail',
 			},
 			{
 				displayName: 'Email Address',
@@ -53,7 +53,7 @@ export class Bounceban implements INodeType {
 				required: true,
 				displayOptions: {
 					show: {
-						operation: ['verifySingle'],
+						operation: ['validateEmail'],
 					},
 				},
 				default: '',
@@ -68,7 +68,7 @@ export class Bounceban implements INodeType {
 				default: {},
 				displayOptions: {
 					show: {
-						operation: ['verifySingle'],
+						operation: ['validateEmail'],
 					},
 				},
 				options: [
@@ -148,7 +148,7 @@ export class Bounceban implements INodeType {
 				const operation = this.getNodeParameter('operation', i) as string;
 				await this.getCredentials('bouncebanApi', i);
 
-				if (operation === 'verifySingle') {
+				if (operation === 'validateEmail') {
 					const email = this.getNodeParameter('email', i) as string;
 					if (!email) {
 						throw new NodeOperationError(this.getNode(), 'Email address is required', {itemIndex: i});
