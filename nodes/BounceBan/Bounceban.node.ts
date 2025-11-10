@@ -130,9 +130,10 @@ export class Bounceban implements INodeType {
 					);
 				} catch (error: any) {
 					lastError = error;
-
-					if (error.statusCode === 408 && attempt < maxRetries) {
-						// sleep 6 seconds before retry
+					const {httpCode, messages} = error;
+					this.logger.error(`Failed to request:`, {httpCode, messages});
+					if (['408'].includes(httpCode) && attempt < maxRetries) {
+						this.logger.info(`Timeout=> sleep to retry (${attempt})`);
 						await new Promise(resolve => setTimeout(resolve, 6000));
 						continue;
 					}
