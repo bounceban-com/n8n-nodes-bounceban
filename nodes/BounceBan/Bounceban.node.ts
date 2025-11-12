@@ -8,6 +8,9 @@ import {
 	NodeConnectionType,
 } from 'n8n-workflow';
 
+const ApiBase = "https://dev.bounceban.com/api/v1"
+// const ApiBase = "https://api.bounceban.com/v1"
+
 export class Bounceban implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'BounceBan',
@@ -124,31 +127,67 @@ export class Bounceban implements INodeType {
 		await this.getCredentials('bouncebanApi');
 		const items = this.getInputData();
 
-		const makeRequestWithRetry = async (options: IHttpRequestOptions, maxRetries = 12) => {
-			let lastError;
-
-			for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		const reqBounceBanApi = async (options: IHttpRequestOptions)=>{
+			options.headers = Object.assign({}, options.headers, {"BB-UTC-Source": "n8n_node"})
+			for (let attempt = 1; attempt <= 3; attempt++) {
 				try {
-					return await this.helpers.httpRequestWithAuthentication.call(
+					const result = await this.helpers.httpRequestWithAuthentication.call(
 						this,
 						'bouncebanApi',
 						options,
 					);
+					this.logger.debug('Api response=>', result)
+					return result
 				} catch (error: any) {
-					lastError = error;
 					const {httpCode, messages} = error;
 					this.logger.error(`Failed to request=> HttpCode: ${httpCode}  Message: ${messages}`);
-					if (['408'].includes(httpCode) && attempt < maxRetries) {
-						this.logger.info(`Timeout=> sleep to retry (${attempt})`);
-						await new Promise(resolve => setTimeout(resolve, 6000));
+					if (['429', '500'].includes(httpCode)) {
+						this.logger.info(`Retry after sleep (${attempt})`);
+						await new Promise(resolve => setTimeout(resolve, attempt * 2000));
 						continue;
 					}
 					throw error;
 				}
 			}
-
-			throw lastError;
 		};
+
+		const validateEmail = async (queries: any)=>{
+			const options: IHttpRequestOptions = {
+				method: 'GET' as IHttpRequestMethods,
+				url: `${ApiBase}/verify/single`,
+				qs: queries,
+				json: true,
+				skipSslCertificateValidation: true,
+			};
+			const result = await reqBounceBanApi(options);
+			const {
+				id: taskId,
+				status,
+				try_again_at
+			} = result;
+			if(!["verifying", "queue"].includes(status) || !taskId){
+				return result
+			}
+			let tryAgainAt = try_again_at || (new Date()).getTime()
+			let attempt = 1;
+			while (attempt < 50){
+				const sleepSecs = Math.max(5, (new Date()).getTime() - tryAgainAt)
+				await new Promise(resolve => setTimeout(resolve, sleepSecs * 1000));
+				attempt++
+				const pollResult = await reqBounceBanApi({
+					method: 'GET' as IHttpRequestMethods,
+					url: `${ApiBase}/verify/single/status`,
+					qs: {id: taskId},
+					json: true,
+					skipSslCertificateValidation: true,
+				});
+				if(!["verifying", "queue"].includes(pollResult.status)){
+					return pollResult
+				}
+				tryAgainAt = pollResult.try_again_at || (new Date()).getTime()
+			}
+			return {error: "Failed to handle request."}
+		}
 
 		// 1. Create an array of promises (tasks to be done)
 		const promises = items.map(async (item, itemIndex) => {
@@ -167,21 +206,14 @@ export class Bounceban implements INodeType {
 				this.logger.info(`start req verify[${itemIndex}]: ${JSON.stringify(queries)}`);
 
 				try {
-					const options: IHttpRequestOptions = {
-						method: 'GET' as IHttpRequestMethods,
-						url: 'https://api-waterfall.bounceban.com/v1/verify/single',
-						qs: queries,
-						json: true,
-						skipSslCertificateValidation: true,
-					};
-					const verifyResult = await makeRequestWithRetry(options);
+					const verifyResult = await validateEmail(queries);
 					return {
 						json: { ...item.json, bounceban_result: verifyResult},
 						pairedItem: { item: itemIndex }
 					};
 				} catch (error) {
 					return {
-						json: { ...item.json, bounceban_result: {error: error.message}},
+						json: { ...item.json, bounceban_result: {error: error.message || error.messages}},
 						pairedItem: { item: itemIndex }
 					};
 				}
