@@ -8,7 +8,7 @@ import {
 export class BounceBanApi implements ICredentialType {
 	name = 'bouncebanApi';
 	displayName = 'BounceBan API';
-	documentationUrl = 'https://bounceban.tawk.help/article/how-to-use-the-n8n-node';
+	documentationUrl = 'https://support.bounceban.com/article/how-to-use-the-n8n-node';
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',
@@ -34,8 +34,8 @@ export class BounceBanApi implements ICredentialType {
     };
     test: ICredentialTestRequest = {
             request: {
-							baseURL: 'https://dev.bounceban.com/api',
-							// baseURL: 'https://api.bounceban.com',
+							// baseURL: 'https://dev.bounceban.com/api',
+							baseURL: 'https://api.bounceban.com',
 							url: '/v1/account',
 							method: 'GET',
 							headers: {
