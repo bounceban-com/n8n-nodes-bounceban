@@ -69,4 +69,4 @@ Verifies a single email address with detailed results.
 
 ---
 
-**Email Verification • Catch-all email verification • email validation • email verificaiton for resend sendgrid mailchimp **
+**Email Verification • Catch-all email verification • email validation • email verification for resend sendgrid mailchimp **
