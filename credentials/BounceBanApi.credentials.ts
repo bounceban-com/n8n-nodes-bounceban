@@ -24,7 +24,6 @@ export class BounceBanApi implements ICredentialType {
 	];
 
     authenticate: IAuthenticateGeneric = {
-
             type: 'generic',
             properties: {
 							headers: {
@@ -38,9 +37,9 @@ export class BounceBanApi implements ICredentialType {
 							baseURL: 'https://api.bounceban.com',
 							url: '/v1/account',
 							method: 'GET',
-							headers: {
-								Authorization: '={{$credentials.apiKey}}',
-							}
+							// headers: {
+							// 	Authorization: '={{$credentials.apiKey}}',
+							// }
             },
     };
 }

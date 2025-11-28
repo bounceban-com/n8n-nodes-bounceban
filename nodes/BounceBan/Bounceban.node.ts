@@ -6,6 +6,10 @@ import {
 	IHttpRequestMethods,
 	IHttpRequestOptions,
 	NodeConnectionType,
+	NodeApiError,
+	JsonObject,
+	NodeOperationError,
+	NodeConnectionTypes
 } from 'n8n-workflow';
 
 export class Bounceban implements INodeType {
@@ -20,8 +24,8 @@ export class Bounceban implements INodeType {
 		defaults: {
 			name: 'BounceBan',
 		},
-		inputs: ['main'] as NodeConnectionType[],
-		outputs: ['main'] as NodeConnectionType[],
+		inputs: [NodeConnectionTypes.Main] as NodeConnectionType[],
+		outputs: [NodeConnectionTypes.Main] as NodeConnectionType[],
 		credentials: [
 			{
 				name: 'bouncebanApi',
@@ -58,6 +62,30 @@ export class Bounceban implements INodeType {
 				default: '',
 				placeholder: 'example@domain.com',
 				description: 'The email address to verify. Can be a static value or use expressions like {{ $JSON.email }}.',
+			},
+			{
+				displayName: 'Processing Mode',
+				name: 'processingMode',
+				type: 'options',
+				displayOptions: {
+					show: {
+						operation: ['validateEmail'],
+					},
+				},
+				options: [
+					{
+						name: 'Verify Email Sequentially (Default)',
+						value: 'sequential',
+						description: 'Verify email one by one',
+					},
+					{
+						name: 'Verify Emails in Batch (Concurrent)',
+						value: 'batch',
+						description: 'Verify multiple items concurrently for better performance',
+					},
+				],
+				default: 'sequential',
+				description: 'Choose how to verify multiple emails',
 			},
 			{
 				displayName: 'Additional Fields',
@@ -124,10 +152,9 @@ export class Bounceban implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		await this.getCredentials('bouncebanApi');
 		const items = this.getInputData();
+		const processingMode = this.getNodeParameter('processingMode', 0) as string;
 
 		const makeRequestWithRetry = async (options: IHttpRequestOptions, maxRetries = 15) => {
-			let lastError;
-
 			for (let attempt = 0; attempt <= maxRetries; attempt++) {
 				try {
 					return await this.helpers.httpRequestWithAuthentication.call(
@@ -136,22 +163,22 @@ export class Bounceban implements INodeType {
 						options,
 					);
 				} catch (error: any) {
-					lastError = error;
-					const {httpCode, messages} = error;
-					this.logger.error(`Failed to request=> HttpCode: ${httpCode}  Message: ${messages}`);
+					const {
+						httpCode,
+						// messages
+					} = error;
+					//this.logger.error(`Failed to request=> HttpCode: ${httpCode}  Message: ${messages}`);
 					if (['408'].includes(httpCode) && attempt < maxRetries) {
 						continue;
 					}
-					throw error;
+					throw new NodeApiError(this.getNode(), error as JsonObject);
 				}
 			}
-
-			throw lastError;
 		};
 
-		// 1. Create an array of promises (tasks to be done)
-		const promises = items.map(async (item, itemIndex) => {
+		const processItem = async (item: INodeExecutionData, itemIndex: number): Promise<INodeExecutionData> => {
 			const operation = this.getNodeParameter('operation', itemIndex) as string;
+
 			if (operation === 'validateEmail'){
 				const email = this.getNodeParameter('email', itemIndex) as string;
 				if (!email) {
@@ -160,43 +187,73 @@ export class Bounceban implements INodeType {
 						pairedItem: { item: itemIndex }
 					};
 				}
+
 				let queries = {email};
 				const additionalFields = this.getNodeParameter('additionalFields', itemIndex) as Record<string, string>;
 				queries = {...queries, ...additionalFields};
-				this.logger.info(`start req verify[${itemIndex}]: ${JSON.stringify(queries)}`);
 
+				const options: IHttpRequestOptions = {
+					method: 'GET' as IHttpRequestMethods,
+					url: 'https://api-waterfall.bounceban.com/v1/verify/single',
+					qs: queries,
+					headers: {
+						"utc_source": "n8n_node"
+					},
+					json: true,
+					skipSslCertificateValidation: true,
+				};
+
+				const verifyResult = await makeRequestWithRetry(options);
+				return {
+					json: { ...item.json, bounceban_result: verifyResult },
+					pairedItem: { item: itemIndex }
+				};
+			} else {
+				throw new NodeOperationError(this.getNode(), "Unknown operation", {
+					description: `Unknown operation: ${operation}`,
+					itemIndex,
+				});
+			}
+		};
+
+		if (processingMode === 'batch') {
+			// Batch mode: process items concurrently (original behavior)
+			const promises = items.map(async (item, itemIndex) => {
 				try {
-					const options: IHttpRequestOptions = {
-						method: 'GET' as IHttpRequestMethods,
-						url: 'https://api-waterfall.bounceban.com/v1/verify/single',
-						qs: queries,
-						headers: {
-							"utc_source": "n8n_node"
-						},
-						json: true,
-						skipSslCertificateValidation: true,
-					};
-					const verifyResult = await makeRequestWithRetry(options);
-					return {
-						json: { ...item.json, bounceban_result: verifyResult},
-						pairedItem: { item: itemIndex }
-					};
+					return await processItem(item, itemIndex);
 				} catch (error) {
+					// In batch mode, we catch errors and return them as part of the result
 					return {
-						json: { ...item.json, bounceban_result: {error: error.message || error.messages}},
+						json: { ...item.json, bounceban_result: { error: error.message } },
 						pairedItem: { item: itemIndex }
 					};
 				}
-			}else {
-				return {
-					json: { ...item.json, bounceban_result: {error: `Unknown operation: ${operation}`}},
-					pairedItem: { item: itemIndex }
-				};
+			});
+			const returnItems = await Promise.all(promises);
+			return [returnItems];
+		} else {
+			const returnData: INodeExecutionData[] = [];
+			// Sequential mode: process items one by one
+			for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+				try {
+					const item = items[itemIndex];
+					const result = await processItem(item, itemIndex);
+					returnData.push(result);
+				} catch (error) {
+					if (this.continueOnFail()) {
+						returnData.push({
+							json: { ...items[itemIndex].json, bounceban_result: {error: error.message}},
+							pairedItem: {item: itemIndex},
+						});
+						continue
+					}
+					throw new NodeOperationError(this.getNode(), error as Error, {
+						description: error.description,
+						itemIndex,
+					});
+				}
 			}
-		});
-		// 2. Wait for ALL promises to complete concurrently
-		const returnItems = await Promise.all(promises);
-		// 3. Return the processed items
-		return [returnItems];
+			return [returnData];
+		}
 	}
 }
