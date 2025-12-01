@@ -35,10 +35,29 @@ export class Bounceban implements INodeType {
 		usableAsTool: true,
 		properties: [
 			{
+				displayName: 'Resource',
+				name: 'resource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Email',
+						value: 'email',
+						description: 'Validate email',
+					}
+				],
+				default: 'email',
+			},
+			{
 				displayName: 'Operation',
 				name: 'operation',
 				type: 'options',
 				noDataExpression: true,
+				displayOptions: {
+					show: {
+						resource: ['email'],
+					},
+				},
 				options: [
 					{
 						name: 'Verify Single Email',
